@@ -1,0 +1,21 @@
+{
+  "settings_version": "0.0.6",
+  "datasets_dir": "C:\\zino-space\\Skill\\PSYC\\Drone\\A8_mini\\datasets",
+  "weights_dir": "weights",
+  "runs_dir": "runs",
+  "uuid": "b4a159075b98ce583cd82c6353290ec111ebe85e9cc944f268236a65257ab7eb",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "hub": true,
+  "mlflow": true,
+  "neptune": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}
