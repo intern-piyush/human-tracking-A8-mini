@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ROI Model Tracker</title>
+  <style>
+    :root {
+      --bg: #0f1720;
+      --panel: #152231;
+      --panel-2: #1d2d40;
+      --text: #ecf3f8;
+      --muted: #9fb2c3;
+      --accent: #4fb0ff;
+      --accent-2: #8be36b;
+      --warn: #ffad5c;
+      --line: rgba(255, 255, 255, 0.1);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(79, 176, 255, 0.12), transparent 30%),
+        radial-gradient(circle at top right, rgba(139, 227, 107, 0.08), transparent 25%),
+        var(--bg);
+      color: var(--text);
+      font: 14px/1.4 "Segoe UI", sans-serif;
+    }
+    .shell {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 20px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 18px;
+    }
+    .panel {
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      backdrop-filter: blur(8px);
+      overflow: hidden;
+    }
+    .panel-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .badge {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(79, 176, 255, 0.16);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .viewer-wrap {
+      position: relative;
+      background: #05090d;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+    }
+    #stream {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    #overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+    }
+    .toolbar {
+      padding: 14px 16px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      border-top: 1px solid var(--line);
+    }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 11px 14px;
+      color: var(--text);
+      background: var(--panel-2);
+      cursor: pointer;
+      font: inherit;
+      font-weight: 600;
+    }
+    button.primary {
+      background: linear-gradient(135deg, #2080d0, #49b0ff);
+    }
+    button.good {
+      background: linear-gradient(135deg, #2b8a3e, #67cf4b);
+    }
+    button.warn {
+      background: linear-gradient(135deg, #b56a17, #ffad5c);
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .side {
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }
+    .stats {
+      padding: 14px 16px;
+      display: grid;
+      gap: 10px;
+    }
+    .row {
+      display: grid;
+      gap: 4px;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .value {
+      font-size: 15px;
+      word-break: break-word;
+    }
+    .gimbal {
+      padding: 14px 16px 18px;
+    }
+    .gimbal-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .gimbal-grid .spacer { visibility: hidden; }
+    .hint {
+      padding: 0 16px 16px;
+      color: var(--muted);
+    }
+    @media (max-width: 980px) {
+      .shell { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="panel">
+      <div class="panel-head">
+        <div class="title">ROI Model Tracker</div>
+        <div class="badge" id="trackingBadge">Idle</div>
+      </div>
+      <div class="viewer-wrap">
+        <img id="stream" src="/stream.mjpg" alt="Live stream">
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="toolbar">
+        <button id="selectBtn" class="primary">Select ROI</button>
+        <button id="trackBtn" class="good">Start / Stop Tracking</button>
+        <button id="centerBtn" class="warn">Center Gimbal</button>
+      </div>
+      <div class="hint">
+        Click <strong>Select ROI</strong>, drag over the live image, then release. The selected model will be loaded and tracking will start automatically.
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <div class="panel-head">
+          <div class="title">Status</div>
+        </div>
+        <div class="stats">
+          <div class="row">
+            <div class="label">Status</div>
+            <div class="value" id="statusText">Connecting...</div>
+          </div>
+          <div class="row">
+            <div class="label">Result</div>
+            <div class="value" id="resultText">No object selected.</div>
+          </div>
+          <div class="row">
+            <div class="label">Selected Model</div>
+            <div class="value" id="modelText">none</div>
+          </div>
+          <div class="row">
+            <div class="label">Detected Object</div>
+            <div class="value" id="objectText">none</div>
+          </div>
+          <div class="row">
+            <div class="label">Yaw / Pitch</div>
+            <div class="value" id="anglesText">0.0 / 0.0</div>
+          </div>
+          <div class="row">
+            <div class="label">Current Target</div>
+            <div class="value" id="targetText">none</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="title">Camera Rotation</div>
+        </div>
+        <div class="gimbal">
+          <div class="gimbal-grid">
+            <div class="spacer">.</div>
+            <button data-yaw="0" data-pitch="-18">Up</button>
+            <div class="spacer">.</div>
+            <button data-yaw="-18" data-pitch="0">Left</button>
+            <button id="stopMotionBtn">Stop</button>
+            <button data-yaw="18" data-pitch="0">Right</button>
+            <div class="spacer">.</div>
+            <button data-yaw="0" data-pitch="18">Down</button>
+            <div class="spacer">.</div>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <script>
+    const stream = document.getElementById("stream");
+    const overlay = document.getElementById("overlay");
+    const ctx = overlay.getContext("2d");
+    const selectBtn = document.getElementById("selectBtn");
+    const trackBtn = document.getElementById("trackBtn");
+    const centerBtn = document.getElementById("centerBtn");
+    const trackingBadge = document.getElementById("trackingBadge");
+
+    const statusText = document.getElementById("statusText");
+    const resultText = document.getElementById("resultText");
+    const modelText = document.getElementById("modelText");
+    const objectText = document.getElementById("objectText");
+    const anglesText = document.getElementById("anglesText");
+    const targetText = document.getElementById("targetText");
+
+    let selectionMode = false;
+    let dragging = false;
+    let dragStart = null;
+    let dragCurrent = null;
+    let frameInfo = { width: 640, height: 360 };
+
+    function fitCanvas() {
+      const rect = stream.getBoundingClientRect();
+      overlay.width = rect.width;
+      overlay.height = rect.height;
+      drawOverlay();
+    }
+
+    function drawOverlay() {
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      if (!selectionMode || !dragStart || !dragCurrent) return;
+
+      const x = Math.min(dragStart.x, dragCurrent.x);
+      const y = Math.min(dragStart.y, dragCurrent.y);
+      const w = Math.abs(dragCurrent.x - dragStart.x);
+      const h = Math.abs(dragCurrent.y - dragStart.y);
+
+      ctx.fillStyle = "rgba(79, 176, 255, 0.18)";
+      ctx.strokeStyle = "#4fb0ff";
+      ctx.lineWidth = 2;
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+    }
+
+    function pointerPos(event) {
+      const rect = overlay.getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+    }
+
+    function canvasToFrameRect() {
+      const x = Math.min(dragStart.x, dragCurrent.x);
+      const y = Math.min(dragStart.y, dragCurrent.y);
+      const w = Math.abs(dragCurrent.x - dragStart.x);
+      const h = Math.abs(dragCurrent.y - dragStart.y);
+      const scaleX = frameInfo.width / overlay.width;
+      const scaleY = frameInfo.height / overlay.height;
+      return {
+        x: Math.round(x * scaleX),
+        y: Math.round(y * scaleY),
+        w: Math.round(w * scaleX),
+        h: Math.round(h * scaleY),
+      };
+    }
+
+    async function postJson(url, payload) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {}),
+      });
+      return response.json();
+    }
+
+    async function refreshStatus() {
+      try {
+        const response = await fetch("/api/status", { cache: "no-store" });
+        const data = await response.json();
+        frameInfo = data.frame || frameInfo;
+        statusText.textContent = data.status || "n/a";
+        resultText.textContent = data.result || "n/a";
+        modelText.textContent = data.selected_model || "none";
+        objectText.textContent = data.detected_object || "none";
+        anglesText.textContent = `${data.yaw ?? 0.0} / ${data.pitch ?? 0.0}`;
+        trackingBadge.textContent = data.tracking_enabled ? "Tracking" : "Idle";
+        trackingBadge.style.color = data.tracking_enabled ? "#8be36b" : "#4fb0ff";
+        trackingBadge.style.background = data.tracking_enabled ? "rgba(139, 227, 107, 0.16)" : "rgba(79, 176, 255, 0.16)";
+
+        if (data.target) {
+          const t = data.target;
+          targetText.textContent = `${t.class_name} x=${Math.round(t.cx)} y=${Math.round(t.cy)} w=${t.w} h=${t.h} conf=${t.confidence.toFixed(2)}`;
+        } else {
+          targetText.textContent = "none";
+        }
+      } catch (_err) {
+        statusText.textContent = "Status request failed.";
+      }
+    }
+
+    selectBtn.addEventListener("click", () => {
+      selectionMode = !selectionMode;
+      dragging = false;
+      dragStart = null;
+      dragCurrent = null;
+      selectBtn.textContent = selectionMode ? "Cancel ROI" : "Select ROI";
+      drawOverlay();
+    });
+
+    overlay.addEventListener("pointerdown", (event) => {
+      if (!selectionMode) return;
+      dragging = true;
+      dragStart = pointerPos(event);
+      dragCurrent = dragStart;
+      drawOverlay();
+    });
+
+    overlay.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      dragCurrent = pointerPos(event);
+      drawOverlay();
+    });
+
+    overlay.addEventListener("pointerup", async () => {
+      if (!dragging || !dragStart || !dragCurrent) return;
+      dragging = false;
+      const roi = canvasToFrameRect();
+      selectionMode = false;
+      selectBtn.textContent = "Select ROI";
+      drawOverlay();
+
+      if (roi.w <= 2 || roi.h <= 2) return;
+      await postJson("/api/select-roi", roi);
+      await refreshStatus();
+    });
+
+    trackBtn.addEventListener("click", async () => {
+      await postJson("/api/toggle-tracking", {});
+      await refreshStatus();
+    });
+
+    centerBtn.addEventListener("click", async () => {
+      await postJson("/api/center", {});
+      await refreshStatus();
+    });
+
+    document.getElementById("stopMotionBtn").addEventListener("click", async () => {
+      await postJson("/api/stop-motion", {});
+      await refreshStatus();
+    });
+
+    document.querySelectorAll("[data-yaw][data-pitch]").forEach((button) => {
+      const payload = {
+        yaw: Number(button.dataset.yaw),
+        pitch: Number(button.dataset.pitch),
+      };
+      button.addEventListener("pointerdown", async () => {
+        await postJson("/api/move", payload);
+      });
+      button.addEventListener("pointerup", async () => {
+        await postJson("/api/stop-motion", {});
+      });
+      button.addEventListener("pointerleave", async () => {
+        await postJson("/api/stop-motion", {});
+      });
+    });
+
+    stream.addEventListener("load", fitCanvas);
+    window.addEventListener("resize", fitCanvas);
+
+    fitCanvas();
+    refreshStatus();
+    setInterval(refreshStatus, 500);
+  </script>
+</body>
+</html>
