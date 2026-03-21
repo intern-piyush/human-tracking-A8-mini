@@ -18,6 +18,7 @@ sys.path.append(sdk_dir)
 
 from siyi_sdk.siyi_sdk import SIYISDK
 from siyi_sdk.stream import SIYIRTSP
+from model_registry import MODELS_DIR, ensure_models_dir, load_model_index
 from ultralytics import YOLO
 
 
@@ -49,9 +50,16 @@ PITCH_SIGN = 1
 
 
 class HumanTrackerApp:
-    def __init__(self, root: tk.Tk) -> None:
+    def __init__(
+        self,
+        root: tk.Tk,
+        model_path: str,
+        target_class: str | None = None,
+        initial_target_bbox: tuple[int, int, int, int] | None = None,
+        auto_start: bool = False,
+    ) -> None:
         self.root = root
-        self.root.title("SIYI Human Tracker")
+        self.root.title("SIYI Object Tracker")
         self.root.geometry("760x680")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -66,17 +74,23 @@ class HumanTrackerApp:
         self.last_detection_time = 0.0
         self.target_lock = threading.Lock()
         self.stop_event = threading.Event()
+        self.target_class = target_class
+        self.initial_target_bbox = initial_target_bbox
 
         self.status_var = tk.StringVar(value="Connecting...")
         self.angle_var = tk.StringVar(value="Yaw: 0.0 deg | Pitch: 0.0 deg")
         self.target_var = tk.StringVar(value="Target: none")
 
-        self.model = YOLO(MODEL_PATH)
-        self.model_name = os.path.basename(MODEL_PATH)
+        self.model_path = model_path
+        self.model = YOLO(model_path)
+        self.model_name = os.path.basename(model_path)
         self.use_cuda = torch.cuda.is_available()
 
         self._build_ui()
         self._connect()
+
+        if self.initial_target_bbox is not None:
+            self._prime_initial_target(self.initial_target_bbox)
 
         self.inference_thread = threading.Thread(target=self.inference_loop, daemon=True)
         self.inference_thread.start()
@@ -84,6 +98,14 @@ class HumanTrackerApp:
         self.root.after(DISPLAY_INTERVAL_MS, self.update_video)
         self.root.after(ATTITUDE_INTERVAL_MS, self.refresh_attitude)
         self.root.after(TRACK_INTERVAL_MS, self.track_loop)
+
+        if auto_start:
+            self.tracking_enabled = True
+            self.track_button.configure(text="Stop Tracking")
+            if self.initial_target_bbox is not None:
+                self.status_var.set("Tracking enabled with selected target.")
+            else:
+                self.status_var.set("Tracking enabled.")
 
     def _build_ui(self) -> None:
         main = ttk.Frame(self.root, padding=12)
@@ -117,6 +139,8 @@ class HumanTrackerApp:
             "If gimbal motion is reversed, change YAW_SIGN or PITCH_SIGN at the top of this file."
         )
         ttk.Label(main, text=note, wraplength=700, justify="left").pack(anchor="w", pady=(12, 0))
+        if self.target_class:
+            ttk.Label(main, text=f"Active class filter: {self.target_class}", wraplength=700, justify="left").pack(anchor="w", pady=(4, 0))
 
     def _connect(self) -> None:
         try:
@@ -133,6 +157,29 @@ class HumanTrackerApp:
             self.status_var.set(f"Connected to {CAMERA_IP}. Model loaded: {self.model_name} on {device_name}")
         except Exception as exc:
             self.status_var.set(f"Connection error: {exc}")
+
+    def _prime_initial_target(self, bbox: tuple[int, int, int, int]) -> None:
+        x, y, w, h = bbox
+        cx = x + (w / 2.0)
+        cy = y + (h / 2.0)
+        seeded_target = {
+            "x": x,
+            "y": y,
+            "w": w,
+            "h": h,
+            "confidence": 1.0,
+            "cls_id": -1,
+            "class_name": self.target_class or "selected",
+            "cx": cx,
+            "cy": cy,
+        }
+        with self.target_lock:
+            self.last_target = seeded_target
+            self.last_detection_time = time.time()
+        self.target_center = (cx, cy)
+        self.target_var.set(
+            f"Target: {seeded_target['class_name']} x={int(cx)} y={int(cy)} w={w} h={h} conf=1.00"
+        )
 
     def toggle_tracking(self) -> None:
         self.tracking_enabled = not self.tracking_enabled
@@ -205,6 +252,9 @@ class HumanTrackerApp:
         cls_list = boxes.cls.cpu().tolist() if boxes.cls is not None else [0.0] * len(xyxy_list)
 
         for xyxy, confidence, cls_id in zip(xyxy_list, conf_list, cls_list):
+            class_name = self.class_name(int(cls_id))
+            if self.target_class and class_name.lower() != self.target_class.lower():
+                continue
             x1, y1, x2, y2 = xyxy
             x = int(x1 * scale_x)
             y = int(y1 * scale_y)
@@ -220,6 +270,7 @@ class HumanTrackerApp:
                     "h": h,
                     "confidence": float(confidence),
                     "cls_id": int(cls_id),
+                    "class_name": class_name,
                     "cx": cx,
                     "cy": cy,
                 }
@@ -320,6 +371,7 @@ class HumanTrackerApp:
                 confidence = target["confidence"]
                 center_x = target["cx"]
                 center_y = target["cy"]
+                class_name = target["class_name"]
                 frame_center_x = frame.shape[1] / 2.0
                 frame_center_y = frame.shape[0] / 2.0
 
@@ -331,7 +383,7 @@ class HumanTrackerApp:
 
                 self.cam.requestGimbalSpeed(yaw_speed, pitch_speed)
                 self.target_var.set(
-                    f"Target: x={int(center_x)} y={int(center_y)} w={w} h={h} conf={confidence:.2f}"
+                    f"Target: {class_name} x={int(center_x)} y={int(center_y)} w={w} h={h} conf={confidence:.2f}"
                 )
                 self.status_var.set(f"Tracking target. yaw_speed={yaw_speed}, pitch_speed={pitch_speed}")
 
@@ -356,6 +408,7 @@ class HumanTrackerApp:
             bh = target["h"]
             confidence = target["confidence"]
             cls_id = target["cls_id"]
+            class_name = target.get("class_name", self.class_name(cls_id))
             scale_x = VIDEO_WIDTH / frame.shape[1]
             scale_y = VIDEO_HEIGHT / frame.shape[0]
 
@@ -367,7 +420,7 @@ class HumanTrackerApp:
             cv2.rectangle(output, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(
                 output,
-                f"{self.class_name(cls_id)} {confidence:.2f}",
+                f"{class_name} {confidence:.2f}",
                 (x1, max(20, y1 - 8)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,
@@ -429,9 +482,37 @@ class HumanTrackerApp:
         self.root.destroy()
 
 
-def main() -> None:
+def resolve_default_model() -> tuple[str, str | None]:
+    ensure_models_dir()
+    if os.path.exists(MODEL_PATH):
+        return MODEL_PATH, None
+
+    indexed = load_model_index(refresh=False)
+    if indexed:
+        first = indexed[0]
+        return str(first["path"]), None
+
+    raise FileNotFoundError(
+        f"No YOLO model found. Put your models inside {MODELS_DIR} or keep {MODEL_PATH} in the project root."
+    )
+
+
+def main(
+    model_path: str | None = None,
+    target_class: str | None = None,
+    initial_target_bbox: tuple[int, int, int, int] | None = None,
+    auto_start: bool = False,
+) -> None:
+    if model_path is None:
+        model_path, _ = resolve_default_model()
     root = tk.Tk()
-    HumanTrackerApp(root)
+    HumanTrackerApp(
+        root,
+        model_path=model_path,
+        target_class=target_class,
+        initial_target_bbox=initial_target_bbox,
+        auto_start=auto_start,
+    )
     root.mainloop()
 
 

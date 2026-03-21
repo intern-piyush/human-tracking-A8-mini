@@ -1,0 +1,38 @@
+{
+  "models_dir": "C:\\zino-space\\Skill\\PSYC\\Drone\\A8_mini\\models",
+  "model_count": 2,
+  "inventory": [
+    {
+      "path": "C:\\zino-space\\Skill\\PSYC\\Drone\\A8_mini\\models\\drone.pt",
+      "size": 22503594,
+      "mtime": 1774015855.0441184
+    },
+    {
+      "path": "C:\\zino-space\\Skill\\PSYC\\Drone\\A8_mini\\models\\person.pt",
+      "size": 22496746,
+      "mtime": 1774004211.3186584
+    }
+  ],
+  "models": [
+    {
+      "name": "drone.pt",
+      "path": "C:\\zino-space\\Skill\\PSYC\\Drone\\A8_mini\\models\\drone.pt",
+      "classes": [
+        "fixedwing",
+        "hexacopter",
+        "quadcopter",
+        "octocopter",
+        "ornithopter"
+      ]
+    },
+    {
+      "name": "person.pt",
+      "path": "C:\\zino-space\\Skill\\PSYC\\Drone\\A8_mini\\models\\person.pt",
+      "classes": [
+        "civilian",
+        "armed",
+        "military"
+      ]
+    }
+  ]
+}
